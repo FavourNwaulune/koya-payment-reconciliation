@@ -1,20 +1,45 @@
 #!/usr/bin/env python3
-"""Payment reconciliation.
 
-Reads payments.jsonl and works out how much money we actually collected.
-Run:  python3 reconcile.py
-"""
 import json
+from decimal import Decimal, InvalidOperation
 
-total = 0.0
-count = 0
 
-with open("payments.jsonl") as f:
+def parse_amount(value):
+    if isinstance(value, bool):
+        raise ValueError("bad amount")
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    return Decimal(str(value).replace(",", "").strip())
+
+
+
+latest = {}
+
+with open("payments.jsonl", encoding="utf-8") as f:
     for line in f:
-        event = json.loads(line)
-        if event["status"] == "success":
-            total += float(event["amount"])
-            count += 1
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # unreadable line
+        if not isinstance(event, dict):
+            continue
+        txn_id = event.get("txn_id")
+        if txn_id is None or txn_id == "":
+            continue  # no txn_id
+        ts = event.get("ts")
+        if txn_id not in latest or ts > latest[txn_id]["ts"]:
+            latest[txn_id] = event
+
+total = Decimal(0)
+count = 0
+for event in latest.values():
+    if event.get("status") != "success":
+        continue
+    try:
+        total += parse_amount(event["amount"])
+    except (KeyError, ValueError, InvalidOperation):
+        continue
+    count += 1
 
 with open("expected.txt") as f:
     expected = int(f.read().strip())
